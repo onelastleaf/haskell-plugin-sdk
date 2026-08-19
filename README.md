@@ -59,10 +59,30 @@ The generated project includes an `echo` action, its test, a Cabal package, and
 the `oll.toml` recipe that tells oll how to build and launch it. Its Cabal file
 depends on `onelastleaf-plugin-sdk ==0.1.0`.
 
-`oll.toml` is the handoff between the project and oll. For this template, oll
-runs `cabal install` in a private checkout, copies the executable into its
-managed `{install}` directory, and launches that copy with
-`OLL_PLUGIN_ENDPOINT` set.
+`oll.toml` is the handoff between the project and oll. The generated manifest
+explicitly selects `checkout = "install"`. This is a publisher-owned template
+choice, not language detection inside oll, and a user mask cannot override it.
+`oll plugin new` only writes the project files; it does not run Cabal, clone a
+repository, contact the daemon, or access the network.
+
+During a source install, update, or reconciliation, oll first uses an internal
+temporary clone to resolve the plugin ID and manifest; that directory is not
+exposed as a recipe placeholder. It then places the complete checkout in a
+candidate `{install}` tree, runs `cabal install` there, and copies the executable
+into that tree. oll validates the result, renames the whole tree once into its
+final UUID-named generation, and only then atomically switches `current`. Source
+steps and runtime argv may use `{install}` and `{mask_dir}`; `{source}` and
+`{generation}` are deliberately not available in this checkout mode.
+
+Consequently, every retained file must remain valid after the candidate is
+renamed. The generated plugin launches the copied executable and is compatible
+with that rule. A custom build that persists the candidate's absolute path—for
+example in runtime data-file configuration—is not; make those paths relocatable
+or explicitly select `checkout = "generation"` and use `{generation}`. The full
+checkout, including `.git`, Cabal build output, and the copied executable,
+remains in the installed generation, so do not put secrets in the repository
+and account for those files when estimating disk use. Release-mode installation
+ignores `source.checkout` and still requires a relocatable published artifact.
 
 If you are changing this SDK and want the plugin to use your local checkout,
 add the checkout to the plugin's `cabal.project`:

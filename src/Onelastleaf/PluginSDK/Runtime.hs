@@ -59,10 +59,10 @@ maximumEnvelopeBytes = 64 * 1024 * 1024
 
 protocolFingerprint :: ByteString.ByteString
 protocolFingerprint = ByteString.pack [
-    0x21, 0xc1, 0x45, 0x63, 0x8f, 0xbe, 0x6a, 0x1f
-  , 0x2d, 0x9a, 0x2c, 0xb2, 0x11, 0x44, 0x03, 0xd4
-  , 0xbe, 0xe4, 0xda, 0x3c, 0x0a, 0xdb, 0xac, 0x09
-  , 0xe8, 0x05, 0xa9, 0x8a, 0x77, 0xd0, 0xd4, 0xda
+    0x9b, 0x23, 0x6b, 0x37, 0x45, 0x59, 0x65, 0x85
+  , 0x84, 0x13, 0xf5, 0x71, 0x7a, 0x88, 0xe2, 0x85
+  , 0x68, 0xa4, 0x59, 0xe8, 0x1e, 0x87, 0xa2, 0x8f
+  , 0xf7, 0x7b, 0xe8, 0x84, 0x5b, 0xcf, 0xf7, 0x5a
   ]
 
 runPlugin :: Plugin -> IO ()
@@ -207,9 +207,11 @@ handleUnsolicited runtime envelope =
 
 acceptHostHello :: Runtime -> PluginEnvelope -> HostHello -> IO Runtime
 acceptHostHello runtime envelope hello = do
+    let sessionId = envelope ^. #sessionId
+        instanceId = envelope ^. #pluginInstanceId
+    when (sessionId == "" || instanceId == "") $
+      protocolError "HostHello envelope omitted its session or instance identity"
     validateHostHello (runtimePlugin runtime) hello
-    let sessionId = hello ^. #sessionId
-        instanceId = hello ^. #pluginInstanceId
     configureSender (runtimeSender runtime) sessionId instanceId
     when (envelope ^. #trace . #callDepth > hello ^. #maximumCallDepth
           || envelope ^. #trace . #causalDepth > hello ^. #maximumCausalDepth) $
@@ -250,8 +252,6 @@ validateHostHello plugin hello = do
           && isJust (hello ^. #maybe'pluginId)
           && isJust (hello ^. #maybe'pluginName)
         valid = present
-          && hello ^. #sessionId /= ""
-          && hello ^. #pluginInstanceId /= ""
           && hello ^. #protocolSchemaSha256 == protocolFingerprint
           && hello ^. #pluginId . #value == pluginId plugin
           && hello ^. #pluginName . #value /= ""
