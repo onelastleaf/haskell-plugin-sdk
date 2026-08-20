@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: ${{ matrix.os }} / GHC ${{ matrix.ghc }}
+    name: ${{ matrix.os }} - GHC ${{ matrix.ghc }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -50,7 +50,12 @@ jobs:
 
       - name: Install native dependencies on macOS
         if: runner.os == 'macOS'
-        run: brew install pkgconf protobuf snappy
+        run: |
+          brew install pkgconf protobuf snappy
+          snappy_pkgconfig="$(brew --prefix snappy)/lib/pkgconfig"
+          printf 'PKG_CONFIG_PATH=%s%s\n' \
+            "$snappy_pkgconfig" "${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
+            >> "$GITHUB_ENV"
 
       - name: Install native dependencies on Windows
         if: runner.os == 'Windows'

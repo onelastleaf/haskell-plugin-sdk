@@ -26,6 +26,7 @@ On macOS with Homebrew, use:
 
 ```console
 brew install pkgconf protobuf snappy
+export PKG_CONFIG_PATH="$(brew --prefix snappy)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 ```
 
 On Windows, install the UCRT64 packages from MSYS2 and make sure its `bin`
