@@ -57,14 +57,6 @@ data Runtime = Runtime {
 maximumEnvelopeBytes :: Int
 maximumEnvelopeBytes = 64 * 1024 * 1024
 
-protocolFingerprint :: ByteString.ByteString
-protocolFingerprint = ByteString.pack [
-    0x9b, 0x23, 0x6b, 0x37, 0x45, 0x59, 0x65, 0x85
-  , 0x84, 0x13, 0xf5, 0x71, 0x7a, 0x88, 0xe2, 0x85
-  , 0x68, 0xa4, 0x59, 0xe8, 0x1e, 0x87, 0xa2, 0x8f
-  , 0xf7, 0x7b, 0xe8, 0x84, 0x5b, 0xcf, 0xf7, 0x5a
-  ]
-
 runPlugin :: Plugin -> IO ()
 runPlugin plugin = do
     endpointValue <- getEnv "OLL_PLUGIN_ENDPOINT"
@@ -225,7 +217,6 @@ acceptHostHello runtime envelope hello = do
         reply = defMessage
           & #pluginId . #value .~ pluginId (runtimePlugin runtime)
           & #pluginName .~ (hello ^. #pluginName)
-          & #protocolSchemaSha256 .~ protocolFingerprint
           & #actions .~ descriptors
           & #pluginVersion .~ pluginVersion (runtimePlugin runtime)
     _ <- sendPayload
@@ -252,7 +243,6 @@ validateHostHello plugin hello = do
           && isJust (hello ^. #maybe'pluginId)
           && isJust (hello ^. #maybe'pluginName)
         valid = present
-          && hello ^. #protocolSchemaSha256 == protocolFingerprint
           && hello ^. #pluginId . #value == pluginId plugin
           && hello ^. #pluginName . #value /= ""
           && hello ^. #maximumCallDepth > 0

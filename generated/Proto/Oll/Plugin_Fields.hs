@@ -638,13 +638,6 @@ protocolError ::
    Data.ProtoLens.Field.HasField s "protocolError" a) =>
   Lens.Family2.LensLike' f s a
 protocolError = Data.ProtoLens.Field.field @"protocolError"
-protocolSchemaSha256 ::
-  forall f s a.
-  (Prelude.Functor f,
-   Data.ProtoLens.Field.HasField s "protocolSchemaSha256" a) =>
-  Lens.Family2.LensLike' f s a
-protocolSchemaSha256
-  = Data.ProtoLens.Field.field @"protocolSchemaSha256"
 readCrdt ::
   forall f s a.
   (Prelude.Functor f,

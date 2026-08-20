@@ -189,6 +189,11 @@ stderr are captured in the per-plugin logs.
 
 Generated Haskell modules are checked in under `generated/`; their canonical
 definitions live under `proto/`. After changing the protocol, regenerate the
-modules with `proto-lens-protoc` and update `protocolFingerprint` in
-`src/Onelastleaf/PluginSDK/Runtime.hs` before publishing. oll, `oll.toml`, the
-generated protocol code, and the SDK must all use the same fingerprint.
+modules with `proto-lens-protoc` before publishing.
+
+This SDK never computes, embeds, publishes, or compares a protobuf schema hash
+or fingerprint. Descriptor-wide hashes change for compatible additions and
+unrelated services, so they reject valid peers. Protocol changes instead
+preserve field numbers and wire types, give additions safe absent semantics,
+and tolerate unknown fields. Exact SDK pins provide reproducible builds; they
+are not protobuf API versioning.
