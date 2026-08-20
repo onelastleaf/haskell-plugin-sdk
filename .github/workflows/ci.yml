@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }} / GHC ${{ matrix.ghc }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            ghc: 9.2.8
+          - os: ubuntu-latest
+            ghc: 9.6.7
+          - os: macos-latest
+            ghc: 9.6.7
+          - os: windows-latest
+            ghc: 9.6.7
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Haskell
+        id: setup-haskell
+        uses: haskell-actions/setup@v2
+        with:
+          ghc-version: ${{ matrix.ghc }}
+          cabal-version: latest
+
+      - name: Cache Cabal packages
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.setup-haskell.outputs.cabal-store }}
+          key: ${{ runner.os }}-ghc-${{ matrix.ghc }}-cabal-${{ hashFiles('**/*.cabal', 'cabal.project') }}
+          restore-keys: |
+            ${{ runner.os }}-ghc-${{ matrix.ghc }}-cabal-
+
+      - name: Check package metadata
+        run: cabal check
+
+      - name: Build
+        run: cabal build all --enable-tests
+
+      - name: Test
+        run: cabal test all --test-show-details=direct
