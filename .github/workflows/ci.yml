@@ -42,6 +42,33 @@ jobs:
           ghc-version: ${{ matrix.ghc }}
           cabal-version: latest
 
+      - name: Install native dependencies on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libsnappy-dev pkg-config protobuf-compiler
+
+      - name: Install native dependencies on macOS
+        if: runner.os == 'macOS'
+        run: brew install pkgconf protobuf snappy
+
+      - name: Install native dependencies on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed `
+            mingw-w64-ucrt-x86_64-pkgconf `
+            mingw-w64-ucrt-x86_64-protobuf `
+            mingw-w64-ucrt-x86_64-snappy
+          Add-Content $env:GITHUB_PATH "C:\msys64\ucrt64\bin"
+          Add-Content $env:GITHUB_ENV `
+            "PKG_CONFIG_PATH=C:/msys64/ucrt64/lib/pkgconfig"
+
+      - name: Check native dependencies
+        run: |
+          pkg-config --modversion snappy
+          protoc --version
+
       - name: Cache Cabal packages
         uses: actions/cache@v5
         with:

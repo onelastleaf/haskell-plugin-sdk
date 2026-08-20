@@ -1,2 +1,6 @@
 packages: .
 
+constraints:
+  grpc-spec +snappy,
+  snappy-c >= 0.1.3,
+  snappy-c +pkg-config
