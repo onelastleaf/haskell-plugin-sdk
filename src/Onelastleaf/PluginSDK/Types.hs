@@ -20,6 +20,7 @@ module Onelastleaf.PluginSDK.Types (
 import Control.Concurrent.STM
 import Control.Exception
 import Data.Char (isAsciiLower, isDigit)
+import Data.Int
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.ProtoLens.Labels ()
@@ -36,38 +37,48 @@ import Proto.Google.Protobuf.Timestamp (Timestamp)
 
 import Onelastleaf.PluginSDK.Host (Host)
 
+-- | An immutable plugin definition. Construct one with 'newPlugin' and
+-- register actions with 'addAction'.
 data Plugin = Plugin {
       pluginId      :: !Text
     , pluginVersion :: !Text
     , pluginActions :: !(Map Text Action)
     }
 
+-- | A named operation exposed to oll.
 data Action = Action {
       actionName        :: !Text
     , actionDescription :: !Text
     , actionHandler     :: ActionHandler
     }
 
+-- | A concurrent job handler. The argument list preserves shell-style order,
+-- duplicates, empty values, and leading dashes.
 type ActionHandler = ActionContext -> [Text] -> IO ActionResult
 
+-- | Per-invocation capabilities and cancellation state. Its constructor is
+-- private outside the package so contexts cannot be forged.
 data ActionContext = ActionContext {
-      actionContextJobId       :: !Text
-    , actionContextDeadline    :: !(Maybe Timestamp)
-    , actionContextTrace       :: !TraceContext
+      actionContextJobId        :: !Text
+    , actionContextDeadline     :: !(Maybe Timestamp)
+    , actionContextTrace        :: !TraceContext
     , actionContextCancellation :: !(TVar Bool)
-    , actionContextHost        :: !Host
+    , actionContextHost         :: !Host
     , actionContextParentCallId :: !Word64
     }
 
+-- | The structured value and already-stored artifacts returned by an action.
 data ActionResult = ActionResult {
       actionResultValue     :: !(Maybe ConfigValue)
     , actionResultArtifacts :: ![ArtifactDescriptor]
     }
 
+-- | Raised by 'checkCancellation' after oll cancels the current job.
 data Cancelled = Cancelled
   deriving stock (Show)
   deriving anyclass (Exception)
 
+-- | Validate an immutable dotted-DNS plugin ID and informational version.
 newPlugin :: Text -> Text -> Either Text Plugin
 newPlugin ident version
   | not (validPluginId ident) = Left "invalid plugin ID"
@@ -78,6 +89,7 @@ newPlugin ident version
       , pluginActions = Map.empty
       }
 
+-- | Add an action, rejecting empty or duplicate names.
 addAction :: Action -> Plugin -> Either Text Plugin
 addAction action plugin
   | Text.null (actionName action) = Left "action name must not be empty"
@@ -87,21 +99,24 @@ addAction action plugin
         pluginActions = Map.insert (actionName action) action (pluginActions plugin)
       }
 
+-- | Return a protobuf string value without artifacts.
 stringResult :: Text -> ActionResult
 stringResult value = ActionResult {
       actionResultValue = Just $ defMessage & #stringValue .~ value
     , actionResultArtifacts = []
     }
 
+-- | Return a protobuf Boolean value without artifacts.
 boolResult :: Bool -> ActionResult
 boolResult value = ActionResult {
       actionResultValue = Just $ defMessage & #boolValue .~ value
     , actionResultArtifacts = []
     }
 
-integerResult :: Int -> ActionResult
+-- | Return the full signed 64-bit range supported by protobuf @sint64@.
+integerResult :: Int64 -> ActionResult
 integerResult value = ActionResult {
-      actionResultValue = Just $ defMessage & #integerValue .~ fromIntegral value
+      actionResultValue = Just $ defMessage & #integerValue .~ value
     , actionResultArtifacts = []
     }
 
@@ -114,9 +129,11 @@ contextTrace = actionContextTrace
 contextDeadline :: ActionContext -> Maybe Timestamp
 contextDeadline = actionContextDeadline
 
+-- | Check cancellation without throwing.
 isCancelled :: ActionContext -> IO Bool
 isCancelled = readTVarIO . actionContextCancellation
 
+-- | Throw 'Cancelled' when cancellation has been requested.
 checkCancellation :: ActionContext -> IO ()
 checkCancellation context = do
     cancelled <- isCancelled context
@@ -137,9 +154,3 @@ validPluginId ident =
         && validEdge (Text.last label)
         && Text.all (\c -> validEdge c || c == '-') label
     validEdge c = isAsciiLower c || isDigit c
-
--- Runtime-only construction; exported through the abstract ActionContext.
-instance Eq Action where
-  left == right =
-    actionName left == actionName right
-      && actionDescription left == actionDescription right

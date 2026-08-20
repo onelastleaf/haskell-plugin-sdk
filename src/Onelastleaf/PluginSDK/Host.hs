@@ -9,10 +9,12 @@ module Onelastleaf.PluginSDK.Host (
   , pluginLog
   , storeArtifact
   , maximumCallDepth
+  , maximumPendingHostCalls
   ) where
 
 import Control.Concurrent.STM
 import Control.Exception
+import Control.Monad
 import Crypto.Hash.SHA256 qualified as SHA256
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as ByteString
@@ -30,9 +32,15 @@ import Proto.Oll.Common
 import Proto.Oll.Config
 import Proto.Oll.Plugin
 
+import Onelastleaf.PluginSDK.Internal.Protocol
 import Onelastleaf.PluginSDK.Internal.Sender
 
-data Pending = Pending !Text !(TMVar PluginEnvelope'Payload)
+data Pending
+  = Waiting !TraceContext !(TMVar PluginEnvelope'Payload)
+  -- Keep the routing identity after action cancellation so the host's already
+  -- running request can reply without turning a job-scoped cancel into a
+  -- session-wide protocol failure.
+  | Abandoned !TraceContext
 
 data Host = Host {
       hostSender                    :: !Sender
@@ -41,6 +49,14 @@ data Host = Host {
     , maximumCallDepth              :: !Word32
     }
 
+-- Pending calls include abandoned routing tombstones. Keeping their number
+-- bounded provides backpressure without discarding the information needed to
+-- consume a valid late response exactly once.
+maximumPendingHostCalls :: Int
+maximumPendingHostCalls = 256
+
+-- | A structured failure returned by, or detected while invoking, an
+-- oll-owned host capability.
 data HostError = HostError !ProtocolError
   deriving stock (Show)
   deriving anyclass (Exception)
@@ -64,24 +80,31 @@ routeHostResponse host envelope =
               writeTVar (hostPending host) $ Map.delete replyTo entries
               pure $ Just entry
         case pending of
-          Nothing -> throwIO $ userError "host response names no pending plugin request"
-          Just (Pending correlationId response) -> do
-            let responseCorrelation = envelope ^. #trace . #correlationId
-            if responseCorrelation /= correlationId
-              then throwIO $ userError "host response changed correlation context"
-              else case envelope ^. #maybe'payload of
-                Nothing -> throwIO $ userError "host response has no payload"
-                Just payload -> atomically (putTMVar response payload) >> pure True
+          Nothing -> case envelope ^. #maybe'payload of
+            Just (PluginEnvelope'ProtocolError errorValue) -> throwIO $ HostError errorValue
+            _ -> protocolViolation "host response names no pending plugin request"
+          Just entry -> do
+            let expectedTrace = case entry of
+                  Waiting trace _ -> trace
+                  Abandoned trace -> trace
+            when (envelope ^. #trace /= expectedTrace) $
+              protocolViolation "host response changed trace context"
+            payload <- maybe (protocolViolation "host response has no payload") pure $
+              envelope ^. #maybe'payload
+            case entry of
+              Waiting _ response -> atomically (putTMVar response payload) >> pure True
+              Abandoned _ -> pure True
 
 hostCall :: Host -> TraceContext -> HostCallRequest -> IO HostCallResponse
 hostCall host trace request =
     requestPayload host trace (PluginEnvelope'HostCall request) >>= \case
       PluginEnvelope'HostResult response ->
         case response ^. #maybe'result of
+          Nothing -> protocolViolation "host call response has no result"
           Just (HostCallResponse'Error protocolError) -> throwIO $ HostError protocolError
-          _ -> pure response
+          Just _ -> pure response
       PluginEnvelope'ProtocolError protocolError -> throwIO $ HostError protocolError
-      _ -> throwIO $ userError "host call received another response kind"
+      _ -> protocolViolation "host call received another response kind"
 
 getConfig :: Host -> TraceContext -> Maybe ConfigPath -> IO GetConfigResponse
 getConfig host trace path = do
@@ -90,7 +113,7 @@ getConfig host trace path = do
       defMessage & #maybe'call .~ Just (HostCallRequest'GetConfig request)
     case response ^. #maybe'result of
       Just (HostCallResponse'GetConfig value) -> pure value
-      _ -> throwIO $ userError "GetConfig received another response kind"
+      _ -> protocolViolation "GetConfig received another response kind"
 
 invokeConfigFunction
   :: Host
@@ -106,7 +129,7 @@ invokeConfigFunction host trace function arguments = do
       defMessage & #maybe'call .~ Just (HostCallRequest'InvokeConfigFunction request)
     case response ^. #maybe'result of
       Just (HostCallResponse'InvokeConfigFunction value) -> pure value
-      _ -> throwIO $ userError "InvokeConfigFunction received another response kind"
+      _ -> protocolViolation "InvokeConfigFunction received another response kind"
 
 pluginLog
   :: Host
@@ -146,13 +169,13 @@ storeArtifact host trace jobId descriptor chunks = do
     requestPayload host trace (PluginEnvelope'ArtifactStart start) >>= \case
       PluginEnvelope'ArtifactAccepted accepted
         | accepted ^. #artifactId == descriptor ^. #artifactId -> pure ()
-      _ -> throwIO $ userError "host did not accept the artifact transfer"
+      _ -> protocolViolation "host did not accept the artifact transfer"
     mapM_ sendChunk (zip [0 ..] chunks)
     let complete = defMessage & #artifactId .~ (descriptor ^. #artifactId)
     requestPayload host trace (PluginEnvelope'ArtifactComplete complete) >>= \case
       PluginEnvelope'ArtifactStored stored
         | stored ^. #artifactId == descriptor ^. #artifactId -> pure stored
-      _ -> throwIO $ userError "host did not acknowledge the stored artifact"
+      _ -> protocolViolation "host did not acknowledge the stored artifact"
   where
     sendChunk (index, bytes) = do
       let chunk = defMessage
@@ -164,7 +187,6 @@ storeArtifact host trace jobId descriptor chunks = do
 
 requestPayload :: Host -> TraceContext -> PluginEnvelope'Payload -> IO PluginEnvelope'Payload
 requestPayload host trace payload = mask $ \restore -> do
-    let correlationId = trace ^. #correlationId
     (messageId, response) <- sendPayloadRegistered
       (hostSender host)
       Nothing
@@ -172,11 +194,17 @@ requestPayload host trace payload = mask $ \restore -> do
       payload
       (\registeredId -> do
         waiter <- newEmptyTMVar
-        modifyTVar' (hostPending host) $
-          Map.insert registeredId (Pending correlationId waiter)
+        entries <- readTVar (hostPending host)
+        check (Map.size entries < maximumPendingHostCalls)
+        writeTVar (hostPending host) $
+          Map.insert registeredId (Waiting trace waiter) entries
         pure waiter)
-    let remove = atomically $ modifyTVar' (hostPending host) (Map.delete messageId)
-    restore (atomically $ takeTMVar response) `finally` remove
+    let abandon = atomically $ modifyTVar' (hostPending host) $
+          Map.adjust abandonPending messageId
+    restore (atomically $ takeTMVar response) `finally` abandon
+  where
+    abandonPending (Waiting expectedTrace _) = Abandoned expectedTrace
+    abandonPending pending@(Abandoned _) = pending
 
 validateArtifact :: Host -> ArtifactDescriptor -> [ByteString] -> IO ()
 validateArtifact host descriptor chunks
@@ -187,26 +215,22 @@ validateArtifact host descriptor chunks
   | ByteString.length (descriptor ^. #sha256) /= 32 =
       invalid "artifact SHA-256 must contain 32 bytes"
   | null chunks || any ByteString.null chunks = invalid "artifact chunks must be nonempty"
-  | length chunks > fromIntegral (maxBound :: Word32) = invalid "artifact has too many chunks"
-  | any ((> fromIntegral (hostMaximumArtifactChunkBytes host)) . ByteString.length) chunks =
+  | toInteger (length chunks) > toInteger (maxBound :: Word32) =
+      invalid "artifact has too many chunks"
+  | any ((> toInteger (hostMaximumArtifactChunkBytes host))
+          . toInteger . ByteString.length) chunks =
       invalid "artifact chunk exceeds the negotiated limit"
-  | toInteger (descriptor ^. #sizeBytes) /= sum (map (toInteger . ByteString.length) chunks) =
+  | descriptor ^. #sizeBytes /= actualSize =
       invalid "artifact size does not match its bytes"
-  | descriptor ^. #sha256 /= SHA256.hash (ByteString.concat chunks) =
+  | descriptor ^. #sha256 /= actualHash =
       invalid "artifact SHA-256 does not match its bytes"
   | otherwise = pure ()
   where
-    invalid = throwIO . userError
+    -- The hashing API already tracks the streamed byte count, avoiding a
+    -- second full size fold and any whole-artifact concatenation.
+    (actualHash, actualSize) =
+      SHA256.finalizeAndLength (SHA256.updates SHA256.init chunks)
 
-validUuidV4 :: Text -> Bool
-validUuidV4 value =
-    Text.length value == 36
-      && and [Text.index value index == '-' | index <- [8, 13, 18, 23]]
-      && Text.index value 14 == '4'
-      && Text.index value 19 `elem` ("89ab" :: String)
-      && all validAt [0 .. 35]
-  where
-    validAt index
-      | index `elem` [8, 13, 18, 23] = True
-      | otherwise = let c = Text.index value index
-                    in c >= '0' && c <= '9' || c >= 'a' && c <= 'f'
+    invalid message = throwIO $ HostError $ defMessage
+      & #code .~ ERROR_CODE_INVALID_ARGUMENT
+      & #message .~ Text.pack message

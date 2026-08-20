@@ -11,6 +11,7 @@ author:             onelastleaf contributors
 maintainer:         onelastleaf contributors
 category:           Network
 build-type:         Simple
+tested-with:        GHC == 9.6.7
 extra-source-files: README.md
                   , proto/oll/common.proto
                   , proto/oll/config.proto
@@ -32,13 +33,16 @@ common language-settings
       TypeApplications
       TypeFamilies
 
-library
+library internal
   import:          language-settings
+  visibility:      private
   hs-source-dirs:  src, generated
   exposed-modules:
-      Onelastleaf.PluginSDK
       Onelastleaf.PluginSDK.Host
       Onelastleaf.PluginSDK.Internal.Endpoint
+      Onelastleaf.PluginSDK.Internal.Protocol
+      Onelastleaf.PluginSDK.Internal.Sender
+      Onelastleaf.PluginSDK.Runtime
       Onelastleaf.PluginSDK.Types
       Proto.Oll.Common
       Proto.Oll.Config
@@ -46,19 +50,16 @@ library
       Proto.Oll.Plugin
       Proto.Oll.Plugin.API
   other-modules:
-      Onelastleaf.PluginSDK.Internal.Sender
-      Onelastleaf.PluginSDK.Runtime
       Proto.Oll.Common_Fields
       Proto.Oll.Config_Fields
       Proto.Oll.Document_Fields
       Proto.Oll.Plugin_Fields
   build-depends:
       async                     >= 2.2 && < 2.3
-    , base                      >= 4.14 && < 5
+    , base                      >= 4.16 && < 5
     , bytestring                >= 0.10 && < 0.13
     , containers                >= 0.6 && < 0.8
     , cryptohash-sha256         >= 0.11 && < 0.12
-    , deepseq                   >= 1.4 && < 1.6
     , grapesy                   >= 1.1.1 && < 1.2
     , network                   >= 3.1 && < 3.3
     , proto-lens                >= 0.7 && < 0.8
@@ -68,16 +69,43 @@ library
     , text                      >= 1.2 && < 2.2
     , time                      >= 1.9 && < 1.15
 
+library
+  import:          language-settings
+  hs-source-dirs:  public
+  exposed-modules: Onelastleaf.PluginSDK
+  reexported-modules:
+      Proto.Oll.Common
+    , Proto.Oll.Config
+    , Proto.Oll.Document
+    , Proto.Oll.Plugin
+  build-depends:
+      base                            >= 4.16 && < 5
+    , bytestring                      >= 0.10 && < 0.13
+    , containers                      >= 0.6 && < 0.8
+    , grapesy                         >= 1.1.1 && < 1.2
+    , onelastleaf-plugin-sdk:internal
+    , proto-lens                      >= 0.7 && < 0.8
+    , text                            >= 1.2 && < 2.2
+
 test-suite unit
   import:         language-settings
   type:           exitcode-stdio-1.0
   hs-source-dirs: test
   main-is:        Main.hs
   build-depends:
-      base
+      async
+    , base
+    , grapesy
     , onelastleaf-plugin-sdk
+    , onelastleaf-plugin-sdk:internal
     , network
+    , proto-lens
+    , stm
     , text
+
+source-repository head
+  type:     git
+  location: https://github.com/onelastleaf/haskell-plugin-sdk.git
 
 executable conformance
   import:         language-settings

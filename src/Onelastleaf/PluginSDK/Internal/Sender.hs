@@ -9,11 +9,12 @@ module Onelastleaf.PluginSDK.Internal.Sender (
   ) where
 
 import Control.Concurrent.STM
-import Data.ByteString qualified as ByteString
+import Control.Exception
+import Control.Monad
 import Data.ProtoLens.Labels ()
-import Data.ProtoLens.Encoding qualified as Protobuf
 import Data.Text (Text)
 import Data.Word
+import Numeric.Natural
 
 import Network.GRPC.Common
 import Network.GRPC.Common.Protobuf (Proto(..), (&), (.~), defMessage)
@@ -25,16 +26,20 @@ data Sender = Sender {
       senderQueue    :: !(TBQueue (Maybe (Proto PluginEnvelope)))
     , senderNextId   :: !(TVar Word64)
     , senderIdentity :: !(TVar (Text, Text))
+    , senderClosed   :: !(TVar Bool)
+    , senderFailure  :: !(TVar (Maybe SomeException))
     }
 
-maximumEnvelopeBytes :: Int
-maximumEnvelopeBytes = 64 * 1024 * 1024
+senderQueueCapacity :: Natural
+senderQueueCapacity = 256
 
 newSender :: IO Sender
 newSender = atomically $ Sender
-    <$> newTBQueue 256
+    <$> newTBQueue senderQueueCapacity
     <*> newTVar 1
     <*> newTVar ("", "")
+    <*> newTVar False
+    <*> newTVar Nothing
 
 configureSender :: Sender -> Text -> Text -> IO ()
 configureSender sender sessionId instanceId =
@@ -57,6 +62,9 @@ sendPayloadRegistered
   -> (Word64 -> STM a)
   -> IO (Word64, a)
 sendPayloadRegistered sender replyTo trace payload register = atomically $ do
+    readTVar (senderFailure sender) >>= maybe (pure ()) throwSTM
+    readTVar (senderClosed sender) >>= \closed ->
+      when closed $ throwSTM $ userError "plugin sender is closed"
     messageId <- readTVar (senderNextId sender)
     if messageId == maxBound
       then throwSTM $ userError "plugin message IDs exhausted"
@@ -69,19 +77,27 @@ sendPayloadRegistered sender replyTo trace payload register = atomically $ do
           & #pluginInstanceId .~ instanceId
           & #trace .~ trace
           & #maybe'payload .~ Just payload
-    if ByteString.length (Protobuf.encodeMessage envelope) > maximumEnvelopeBytes
-      then throwSTM $ userError "plugin envelope exceeds 64 MiB"
-      else do
-        registered <- register messageId
-        writeTBQueue (senderQueue sender) (Just (Proto envelope))
-        pure (messageId, registered)
+    -- Registration and queue admission are one transaction. A response can
+    -- therefore never reach the stream reader before its waiter is visible.
+    registered <- register messageId
+    writeTBQueue (senderQueue sender) (Just (Proto envelope))
+    pure (messageId, registered)
 
 runSender :: Sender -> (NextElem (Proto PluginEnvelope) -> IO ()) -> IO ()
-runSender sender send = loop
+runSender sender send = loop `catch` rememberFailure
   where
     loop = atomically (readTBQueue $ senderQueue sender) >>= \case
       Nothing -> send NoNextElem
       Just envelope -> send (NextElem envelope) >> loop
 
+    rememberFailure (errorValue :: SomeException) = do
+      atomically $ writeTVar (senderFailure sender) (Just errorValue)
+      throwIO errorValue
+
 closeSender :: Sender -> IO ()
-closeSender sender = atomically $ writeTBQueue (senderQueue sender) Nothing
+closeSender sender = atomically $ do
+    readTVar (senderFailure sender) >>= maybe (pure ()) throwSTM
+    closed <- readTVar (senderClosed sender)
+    unless closed $ do
+      writeTVar (senderClosed sender) True
+      writeTBQueue (senderQueue sender) Nothing
