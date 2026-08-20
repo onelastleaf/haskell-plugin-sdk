@@ -52,10 +52,12 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install pkgconf protobuf snappy
-          snappy_pkgconfig="$(brew --prefix snappy)/lib/pkgconfig"
-          printf 'PKG_CONFIG_PATH=%s%s\n' \
-            "$snappy_pkgconfig" "${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
-            >> "$GITHUB_ENV"
+          snappy_prefix="$(brew --prefix snappy)"
+          printf '%s\n' \
+            'package snappy-c' \
+            "  extra-include-dirs: $snappy_prefix/include" \
+            "  extra-lib-dirs: $snappy_prefix/lib" \
+            > cabal.project.local
 
       - name: Install native dependencies on Windows
         if: runner.os == 'Windows'
@@ -68,17 +70,20 @@ jobs:
           Add-Content $env:GITHUB_PATH "C:\msys64\ucrt64\bin"
           Add-Content $env:GITHUB_ENV `
             "PKG_CONFIG_PATH=C:/msys64/ucrt64/lib/pkgconfig"
+          @(
+            "package snappy-c"
+            "  extra-include-dirs: C:/msys64/ucrt64/include"
+            "  extra-lib-dirs: C:/msys64/ucrt64/lib"
+          ) | Set-Content cabal.project.local
 
-      - name: Check native dependencies
-        run: |
-          pkg-config --modversion snappy
-          protoc --version
+      - name: Check Protocol Buffers compiler
+        run: protoc --version
 
       - name: Cache Cabal packages
         uses: actions/cache@v5
         with:
           path: ${{ steps.setup-haskell.outputs.cabal-store }}
-          key: ${{ runner.os }}-ghc-${{ matrix.ghc }}-cabal-${{ hashFiles('**/*.cabal', 'cabal.project') }}
+          key: ${{ runner.os }}-ghc-${{ matrix.ghc }}-cabal-${{ hashFiles('**/*.cabal', 'cabal.project', 'cabal.project.local') }}
           restore-keys: |
             ${{ runner.os }}-ghc-${{ matrix.ghc }}-cabal-
 
