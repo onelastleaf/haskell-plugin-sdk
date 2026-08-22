@@ -5,7 +5,7 @@ synopsis:           Official onelastleaf process-plugin SDK for Haskell
 description:        A Grapesy-based runtime for trusted onelastleaf plugins.
 homepage:           https://github.com/onelastleaf/haskell-plugin-sdk
 bug-reports:        https://github.com/onelastleaf/haskell-plugin-sdk/issues
-license:            GPL-3.0-only
+license:            GPL-3.0-or-later
 license-file:       LICENSE
 copyright:          Copyright (c) 2026 onelastleaf contributors
 author:             onelastleaf contributors
