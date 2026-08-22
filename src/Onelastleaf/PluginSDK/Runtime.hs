@@ -85,6 +85,8 @@ data Runtime = Runtime {
 runtimeEventQueueCapacity :: Natural
 runtimeEventQueueCapacity = 256
 
+-- | Connect to oll using the injected endpoint and run the plugin until the
+-- host or parent process terminates the session.
 runPlugin :: Plugin -> IO ()
 runPlugin plugin = do
     endpointValue <- getEnv "OLL_PLUGIN_ENDPOINT"

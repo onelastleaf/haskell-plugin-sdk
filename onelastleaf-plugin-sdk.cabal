@@ -7,6 +7,7 @@ homepage:           https://github.com/onelastleaf/haskell-plugin-sdk
 bug-reports:        https://github.com/onelastleaf/haskell-plugin-sdk/issues
 license:            GPL-3.0-only
 license-file:       LICENSE
+copyright:          Copyright (c) 2026 onelastleaf contributors
 author:             onelastleaf contributors
 maintainer:         onelastleaf contributors
 category:           Network
@@ -18,6 +19,7 @@ extra-source-files: README.md
                   , proto/oll/config.proto
                   , proto/oll/document.proto
                   , proto/oll/plugin.proto
+extra-doc-files:    CHANGELOG.md
 
 common language-settings
   default-language: GHC2021
@@ -34,27 +36,8 @@ common language-settings
       TypeApplications
       TypeFamilies
 
-library internal
-  import:          language-settings
-  visibility:      private
-  hs-source-dirs:  src, generated
-  exposed-modules:
-      Onelastleaf.PluginSDK.Host
-      Onelastleaf.PluginSDK.Internal.Endpoint
-      Onelastleaf.PluginSDK.Internal.Protocol
-      Onelastleaf.PluginSDK.Internal.Sender
-      Onelastleaf.PluginSDK.Runtime
-      Onelastleaf.PluginSDK.Types
-      Proto.Oll.Common
-      Proto.Oll.Config
-      Proto.Oll.Document
-      Proto.Oll.Plugin
-      Proto.Oll.Plugin.API
-  other-modules:
-      Proto.Oll.Common_Fields
-      Proto.Oll.Config_Fields
-      Proto.Oll.Document_Fields
-      Proto.Oll.Plugin_Fields
+common sdk-component
+  import: language-settings
   build-depends:
       async                     >= 2.2 && < 2.3
     , base                      >= 4.16 && < 5
@@ -71,38 +54,49 @@ library internal
     , time                      >= 1.9 && < 1.15
 
 library
-  import:          language-settings
-  hs-source-dirs:  public
-  exposed-modules: Onelastleaf.PluginSDK
-  reexported-modules:
+  import:          sdk-component
+  hs-source-dirs:  public, src, generated
+  exposed-modules:
+      Onelastleaf.PluginSDK
       Proto.Oll.Common
-    , Proto.Oll.Config
-    , Proto.Oll.Document
-    , Proto.Oll.Plugin
-  build-depends:
-      base                            >= 4.16 && < 5
-    , bytestring                      >= 0.10 && < 0.13
-    , containers                      >= 0.6 && < 0.8
-    , grapesy                         >= 1.1.1 && < 1.2
-    , onelastleaf-plugin-sdk:internal
-    , proto-lens                      >= 0.7 && < 0.8
-    , text                            >= 1.2 && < 2.2
+      Proto.Oll.Config
+      Proto.Oll.Document
+      Proto.Oll.Plugin
+  other-modules:
+      Onelastleaf.PluginSDK.Host
+      Onelastleaf.PluginSDK.Internal.Endpoint
+      Onelastleaf.PluginSDK.Internal.Protocol
+      Onelastleaf.PluginSDK.Internal.Sender
+      Onelastleaf.PluginSDK.Runtime
+      Onelastleaf.PluginSDK.Types
+      Proto.Oll.Plugin.API
+      Proto.Oll.Common_Fields
+      Proto.Oll.Config_Fields
+      Proto.Oll.Document_Fields
+      Proto.Oll.Plugin_Fields
 
 test-suite unit
-  import:         language-settings
-  type:           exitcode-stdio-1.0
-  hs-source-dirs: test
-  main-is:        Main.hs
-  build-depends:
-      async
-    , base
-    , grapesy
-    , onelastleaf-plugin-sdk
-    , onelastleaf-plugin-sdk:internal
-    , network
-    , proto-lens
-    , stm
-    , text
+  import:          sdk-component
+  type:            exitcode-stdio-1.0
+  hs-source-dirs:  test, public, src, generated
+  main-is:         Main.hs
+  other-modules:
+      Onelastleaf.PluginSDK
+      Onelastleaf.PluginSDK.Host
+      Onelastleaf.PluginSDK.Internal.Endpoint
+      Onelastleaf.PluginSDK.Internal.Protocol
+      Onelastleaf.PluginSDK.Internal.Sender
+      Onelastleaf.PluginSDK.Runtime
+      Onelastleaf.PluginSDK.Types
+      Proto.Oll.Common
+      Proto.Oll.Common_Fields
+      Proto.Oll.Config
+      Proto.Oll.Config_Fields
+      Proto.Oll.Document
+      Proto.Oll.Document_Fields
+      Proto.Oll.Plugin
+      Proto.Oll.Plugin.API
+      Proto.Oll.Plugin_Fields
 
 source-repository head
   type:     git

@@ -120,12 +120,15 @@ integerResult value = ActionResult {
     , actionResultArtifacts = []
     }
 
+-- | Return the identifier of the current job.
 contextJobId :: ActionContext -> Text
 contextJobId = actionContextJobId
 
+-- | Return the trace context inherited from the current job.
 contextTrace :: ActionContext -> TraceContext
 contextTrace = actionContextTrace
 
+-- | Return the optional deadline advertised for the current job.
 contextDeadline :: ActionContext -> Maybe Timestamp
 contextDeadline = actionContextDeadline
 

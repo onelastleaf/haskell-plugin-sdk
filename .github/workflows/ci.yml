@@ -95,3 +95,18 @@ jobs:
 
       - name: Test
         run: cabal test all --test-show-details=direct
+
+      - name: Check Hackage documentation
+        if: runner.os == 'Linux' && matrix.ghc == '9.6.7'
+        run: |
+          documentation_output="$(mktemp)"
+          cabal haddock onelastleaf-plugin-sdk --haddock-for-hackage \
+            2>&1 | tee "$documentation_output"
+          grep -E \
+            "100% \( *[0-9]+ / *[0-9]+\) in 'Onelastleaf.PluginSDK'" \
+            "$documentation_output"
+          if grep -E \
+            "Couldn't find \.haddock|Cannot find reexported module|could not find link destinations" \
+            "$documentation_output"; then
+            exit 1
+          fi
